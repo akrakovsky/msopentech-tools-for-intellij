@@ -176,6 +176,21 @@ limitations under the License.
             <reference ref="Actions.DeployAction"/>
             <reference ref="Actions.UnpublishAction"/>
         </group>
+        <action id="Azure.VisualStudioAndroidEmulatorMgrToolsMenu"
+                class="com.microsoftopentechnologies.intellij.actions.VisualStudioAndroidEmulatorManagerAction"
+                text="Visual Studio Emulator for Android "
+                description="Manage and run Android emulated devices using Visual Studio Emulator for Android"
+                icon="/com/microsoftopentechnologies/intellij/icons/service.png">
+            <add-to-group group-id="ToolsMenu" anchor="before"
+                          relative-to-action="AndroidToolsGroup"/>
+        </action>
+        <action id="Azure.VisualStudioAndroidEmulatorMgrToolBar"
+                class="com.microsoftopentechnologies.intellij.actions.VisualStudioAndroidEmulatorManagerAction"
+                text="Visual Studio Emulator for Android "
+                description="Manage and run Android emulated devices using Visual Studio Emulator for Android"
+                icon="/com/microsoftopentechnologies/intellij/icons/service.png">
+            <add-to-group group-id="Android.MainToolBarActionGroup" anchor="first"/>
+        </action>
     </actions>
 
     <helpset file="msopentech-tools-help.jar" path="/helpset.hs"/>

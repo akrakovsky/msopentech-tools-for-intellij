@@ -34,6 +34,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.io.File;
+import java.io.IOException;
 
 
 public class VisualStudioEmulatorManagerForm extends DialogWrapper {
@@ -68,6 +69,7 @@ public class VisualStudioEmulatorManagerForm extends DialogWrapper {
                 VSEmulatorHelper.showImagesManager();
             }
         });
+
         fillList();
     }
 
@@ -83,33 +85,36 @@ public class VisualStudioEmulatorManagerForm extends DialogWrapper {
             if (project.getWorkspaceFile() != null) {
                 String xml = new String(project.getWorkspaceFile().contentsToByteArray());
                 NodeList nodeList = (NodeList) XmlHelper.getXMLValue(xml,
-                        "/project/component[@name='RunManager']/configuration[ @type='AndroidRunConfigurationType']/method",
+                        "/project/component[@name='RunManager']/configuration[@type='AndroidRunConfigurationType'][@default='false']/method",
                         XPathConstants.NODESET);
 
-                for (int i = 0; i < nodeList.getLength(); i++) {
-                    Node item = nodeList.item(i);
+                Node item = nodeList.item(0);
 
-                    for (int ii = 0; ii < nodeList.getLength(); ii++) {
-                        Node node = item.getChildNodes().item(ii);
-                        if (node.hasAttributes()) {
-                            String value = XmlHelper.getAttributeValue(node, "actionId");
-                            if (value != null && value.equals("Tool_External Tools_RunVSEmu")) {
-                                item.removeChild(node);
-                            }
+                for (int i = 0; i < item.getChildNodes().getLength(); i++) {
+                    Node node = item.getChildNodes().item(i);
+                    if (node.hasAttributes()) {
+                        String value = XmlHelper.getAttributeValue(node, "actionId");
+                        if (value != null && value.equals("Tool_External Tools_RunVSEmu")) {
+                            item.removeChild(node);
                         }
                     }
+                }
 
-                    if (useVisualStudioEmulatorCheckBox.isSelected()) {
-                        Element option = item.getOwnerDocument().createElement("option");
-                        option.setAttribute("name", "ToolBeforeRunTask");
-                        option.setAttribute("enabled", "true");
-                        option.setAttribute("actionId", "Tool_External Tools_RunVSEmu");
+                if (useVisualStudioEmulatorCheckBox.isSelected()) {
+                    Element option = item.getOwnerDocument().createElement("option");
+                    option.setAttribute("name", "ToolBeforeRunTask");
+                    option.setAttribute("enabled", "true");
+                    option.setAttribute("actionId", "Tool_External Tools_RunVSEmu");
 
-                        item.appendChild(option);
-                        VSEmulatorHelper.setVSEmuTool(files[imagesList.getSelectedIndex()]);
+                    if(item.hasChildNodes()) {
+                        item.insertBefore(option, item.getFirstChild());
                     } else {
-                        VSEmulatorHelper.unsetVSEmuTool();
+                        item.appendChild(option);
                     }
+
+                    VSEmulatorHelper.setVSEmuTool(files[imagesList.getSelectedIndex()]);
+                } else {
+                    VSEmulatorHelper.unsetVSEmuTool();
                 }
 
                 final String content = XmlHelper.saveXmlToStreamWriter(nodeList.item(0).getOwnerDocument());
@@ -132,7 +137,7 @@ public class VisualStudioEmulatorManagerForm extends DialogWrapper {
 
                 this.close(DialogWrapper.OK_EXIT_CODE);
             }
-        } catch(Throwable ex) {
+        } catch (Throwable ex) {
             DefaultLoader.getUIHelper().showException(
                     "Error trying to change run settings",
                     ex,
@@ -157,9 +162,29 @@ public class VisualStudioEmulatorManagerForm extends DialogWrapper {
                 return files[i].getName().replace(".cfg", "");
             }
         });
+
+        try {
+            File configFile = VSEmulatorHelper.getVSEmuToolName();
+
+            if(configFile != null) {
+                for (int i = 0; i < files.length; i++) {
+                    if(configFile.getName().equals(files[i].getName())) {
+                        imagesList.setEnabled(true);
+                        manageImagesButton.setEnabled(true);
+
+                        useVisualStudioEmulatorCheckBox.setSelected(true);
+                        imagesList.setSelectedIndex(i);
+                    }
+                }
+            }
+
+        } catch (IOException ex) {
+            DefaultLoader.getUIHelper().showException(
+                    "Error trying to change run settings",
+                    ex,
+                    "Visual Studio Emulator for Android",
+                    false,
+                    true);
+        }
     }
-
-
-
-
 }

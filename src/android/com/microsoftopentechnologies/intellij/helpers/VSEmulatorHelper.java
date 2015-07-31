@@ -17,11 +17,13 @@
 package com.microsoftopentechnologies.intellij.helpers;
 
 import com.google.common.io.Files;
+import com.intellij.execution.configurations.CommandLineTokenizer;
 import com.intellij.tools.Tool;
 import com.intellij.tools.ToolManager;
 import com.intellij.tools.ToolsGroup;
 import com.microsoftopentechnologies.tooling.msservices.components.DefaultLoader;
 import com.microsoftopentechnologies.tooling.msservices.helpers.azure.AzureCmdException;
+import org.apache.commons.lang.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
@@ -32,15 +34,14 @@ import java.lang.reflect.Method;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Vector;
+import java.util.regex.Pattern;
 
 public class VSEmulatorHelper {
-    //TODO: Create config pane to manually change the path
     private static final String IMAGE_STORAGE = System.getenv("LOCALAPPDATA") + "\\Microsoft\\VisualStudioEmulator\\Android\\Containers\\Local\\Devices\\";
     private static final String RUN_CMD_FORMAT = "/c start /B %s /sku Android  /displayName \"%s\" /memSize %s /diagonalSize %s /video \"%s\" /vhd \"%s\" /name \"%s\"";
-    private static final String XDE_PATH = getProgramFilesPath() + "\\Microsoft XDE\\10.0.1.0";
-
-    //TODO: Build this path by code from XDE_PATH
-    private static final String ESCAPED_XDE_PATH = "c:\\\"Program Files (x86)\"\\\"Microsoft XDE\"\\10.0.1.0\\xde.exe";
+    private static final String TOOL_NAME = "RunVSEmu";
+    private static final String GROUP_NAME = "External Tools";
 
     public static void unsetVSEmuTool() {
         List<ToolsGroup<Tool>> groups = ToolManager.getInstance().getGroups();
@@ -58,6 +59,36 @@ public class VSEmulatorHelper {
         ToolManager.getInstance().setTools(groups.toArray(new ToolsGroup[groups.size()]));
     }
 
+    public static File getVSEmuToolName() throws IOException {
+
+        Tool existingTool = getExistingTool();
+        if(existingTool != null) {
+
+            String displayNameTool = null;
+
+            CommandLineTokenizer commandLine = new CommandLineTokenizer(existingTool.getParameters());
+
+            while(commandLine.hasMoreTokens()) {
+                if(commandLine.nextToken().equals("/displayName")) {
+                    displayNameTool = commandLine.peekNextToken();
+                }
+            }
+
+            if (displayNameTool != null) {
+
+                for (File configFile : getEmulatorList()) {
+                    List<String> configData = Files.readLines(configFile, Charset.defaultCharset());
+                    String displayName = getConfigValue(configData, "device.name").replace("\"", "");
+                    if(displayName.equals(displayNameTool)) {
+                        return configFile;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
     public static void setVSEmuTool(File configFile) throws IOException {
 
         List<String> configData = Files.readLines(configFile, Charset.defaultCharset());
@@ -67,32 +98,47 @@ public class VSEmulatorHelper {
         String diagonalSize = getConfigValue(configData, "device.screen.diagonal");
         String video = getConfigValue(configData, "device.screen.resolution");
         String vhd = configFile.getParentFile().getPath() + "\\" + getConfigValue(configData, "device.vm.vhd").replace("\\\\","\\");
-        String name= getConfigValue(configData, "device.name").replace("\"","");
+        String name= getConfigValue(configData, "device.name").replace("\"", "") + "." + System.getProperty("user.name");
 
-        String cmdParams = String.format(RUN_CMD_FORMAT, ESCAPED_XDE_PATH, displayName, memSize, diagonalSize, video, vhd, name);
+        String cmdParams = String.format(RUN_CMD_FORMAT, escapeCmdPath(getXDEPath() + "\\xde.exe"), displayName, memSize, diagonalSize, video, vhd, name);
 
-        List<ToolsGroup<Tool>> groups = ToolManager.getInstance().getGroups();
+        Vector<ToolsGroup<Tool>> groups = new Vector<ToolsGroup<Tool>>(ToolManager.getInstance().getGroups());
+
+        ToolsGroup<Tool> externalTools = null;
 
         for (ToolsGroup<Tool> toolsGroup : groups) {
-            if(toolsGroup.getName().equals("External Tools")) {
-                Tool tool = new Tool();
-
-                try {
-
-                    Method setName = Tool.class.getDeclaredMethod("setName", String.class);
-                    setName.setAccessible(true);
-                    setName.invoke(tool, "RunVSEmu");
-
-                } catch (Throwable ignore){}
-                tool.setEnabled(true);
-                tool.setProgram("cmd");
-
-                tool.setParameters(cmdParams);
-                tool.setWorkingDirectory(XDE_PATH);
-
-                toolsGroup.addElement(tool);
+            if(toolsGroup.getName().equals(GROUP_NAME)) {
+                externalTools = toolsGroup;
             }
         }
+
+        if(externalTools == null) {
+            externalTools = new ToolsGroup<Tool>(GROUP_NAME);
+            groups.add(externalTools);
+        }
+
+
+        Tool tool = getExistingTool();
+
+        if(tool == null) {
+            tool = new Tool();
+        }
+
+        try {
+
+            Method setName = Tool.class.getDeclaredMethod("setName", String.class);
+            setName.setAccessible(true);
+            setName.invoke(tool, TOOL_NAME);
+
+        } catch (Throwable ignore){}
+
+        tool.setEnabled(true);
+        tool.setProgram("cmd");
+
+        tool.setParameters(cmdParams);
+        tool.setWorkingDirectory(getXDEPath());
+
+        externalTools.addElement(tool);
 
         ToolManager.getInstance().setTools(groups.toArray(new ToolsGroup[groups.size()]));
     }
@@ -118,7 +164,7 @@ public class VSEmulatorHelper {
 
         if(workingDir.exists()) {
             try {
-                String[] cmd = {workingDir.getPath() + File.separator + "emulatormgr", "/sku", "Android"};
+                String[] cmd = {workingDir.getPath() + File.separator + "emulatormgr", "/sku:Android"};
 
                 runCommand(cmd, workingDir);
             } catch (Exception ex) {
@@ -128,6 +174,16 @@ public class VSEmulatorHelper {
             DefaultLoader.getUIHelper().showException("Visual Studio Emulator for Android not found", new Exception());
         }
 
+    }
+
+    private static Tool getExistingTool() {
+        for (Tool existingTool : ToolManager.getInstance().getTools(GROUP_NAME)) {
+            if(existingTool.getName().equals(TOOL_NAME)) {
+                return existingTool;
+            }
+        }
+
+        return null;
     }
 
     @NotNull
@@ -142,6 +198,7 @@ public class VSEmulatorHelper {
     }
 
 
+    @NotNull
     private static String getProgramFilesPath() {
         String path = System.getenv("programfiles") + " (x86)" ;
 
@@ -151,6 +208,34 @@ public class VSEmulatorHelper {
         }
 
         return path;
+    }
+
+    @NotNull
+    private static String getXDEPath() {
+        File[] xdeDirectories = new File(getProgramFilesPath() + "\\Microsoft XDE\\").listFiles();
+        if(xdeDirectories != null) {
+            for (File file : xdeDirectories){
+                if (file.getName().startsWith("10.")) {
+                    return file.getPath();
+                }
+            }
+        }
+
+        return "";
+    }
+
+    private static String escapeCmdPath(String path) {
+        List<String> newPath = new ArrayList<String>();
+        String[] parts = path.split(Pattern.quote(File.separator));
+
+        newPath.add(parts[0]);
+
+        for (int i = 1; i < parts.length ; i++) {
+            newPath.add("\"" + parts[i] + "\"");
+        }
+
+
+        return StringUtils.join(newPath, File.separator);
     }
 
     private static void runCommand(String[] cmd, File path) throws AzureCmdException, IOException, InterruptedException {

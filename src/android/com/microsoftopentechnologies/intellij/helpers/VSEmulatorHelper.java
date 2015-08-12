@@ -18,12 +18,14 @@ package com.microsoftopentechnologies.intellij.helpers;
 
 import com.google.common.io.Files;
 import com.intellij.execution.configurations.CommandLineTokenizer;
+import com.intellij.openapi.project.Project;
 import com.intellij.tools.Tool;
 import com.intellij.tools.ToolManager;
 import com.intellij.tools.ToolsGroup;
 import com.microsoftopentechnologies.tooling.msservices.components.DefaultLoader;
 import com.microsoftopentechnologies.tooling.msservices.helpers.azure.AzureCmdException;
 import org.apache.commons.lang.StringUtils;
+import org.jetbrains.android.sdk.AndroidSdkUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
@@ -31,6 +33,7 @@ import java.io.FileFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,16 +43,18 @@ import java.util.regex.Pattern;
 public class VSEmulatorHelper {
     private static final String IMAGE_STORAGE = System.getenv("LOCALAPPDATA") + "\\Microsoft\\VisualStudioEmulator\\Android\\Containers\\Local\\Devices\\";
     private static final String RUN_CMD_FORMAT = "/c start /B %s /sku Android  /displayName \"%s\" /memSize %s /diagonalSize %s /video \"%s\" /vhd \"%s\" /name \"%s\"";
-    private static final String TOOL_NAME = "RunVSEmu";
+
     private static final String GROUP_NAME = "External Tools";
+    private static final String XDE_TOOL_NAME = "RunVSEmu";
+    private static final String ADB_TOOL_NAME = "RunAdbDevice";
 
     public static void unsetVSEmuTool() {
         List<ToolsGroup<Tool>> groups = ToolManager.getInstance().getGroups();
 
         for (ToolsGroup<Tool> toolsGroup : groups) {
-            if (toolsGroup.getName().equals("External Tools")) {
+            if (toolsGroup.getName().equals(GROUP_NAME)) {
                 for (Tool tool : toolsGroup.getElements()) {
-                    if(tool.getName().equals("RunVSEmu")) {
+                    if(tool.getName().equals(XDE_TOOL_NAME) || tool.getName().equals(ADB_TOOL_NAME)) {
                         toolsGroup.removeElement(tool);
                     }
                 }
@@ -61,7 +66,7 @@ public class VSEmulatorHelper {
 
     public static File getVSEmuToolName() throws IOException {
 
-        Tool existingTool = getExistingTool();
+        Tool existingTool = getExistingTool(XDE_TOOL_NAME);
         if(existingTool != null) {
 
             String displayNameTool = null;
@@ -89,19 +94,7 @@ public class VSEmulatorHelper {
         return null;
     }
 
-    public static void setVSEmuTool(File configFile) throws IOException {
-
-        List<String> configData = Files.readLines(configFile, Charset.defaultCharset());
-
-        String displayName = getConfigValue(configData, "device.name").replace("\"", "");
-        String memSize = getConfigValue(configData, "device.vm.ram.size");
-        String diagonalSize = getConfigValue(configData, "device.screen.diagonal");
-        String video = getConfigValue(configData, "device.screen.resolution");
-        String vhd = configFile.getParentFile().getPath() + "\\" + getConfigValue(configData, "device.vm.vhd").replace("\\\\","\\");
-        String name= getConfigValue(configData, "device.name").replace("\"", "") + "." + System.getProperty("user.name");
-
-        String cmdParams = String.format(RUN_CMD_FORMAT, escapeCmdPath(getXDEPath() + "\\xde.exe"), displayName, memSize, diagonalSize, video, vhd, name);
-
+    public static void setVSEmuTool(File configFile, Project project) throws IOException {
         Vector<ToolsGroup<Tool>> groups = new Vector<ToolsGroup<Tool>>(ToolManager.getInstance().getGroups());
 
         ToolsGroup<Tool> externalTools = null;
@@ -117,28 +110,12 @@ public class VSEmulatorHelper {
             groups.add(externalTools);
         }
 
+        externalTools.addElement(createXdeTool(configFile));
 
-        Tool tool = getExistingTool();
-
-        if(tool == null) {
-            tool = new Tool();
+        File adb = AndroidSdkUtils.getAdb(project);
+        if(adb != null) {
+            externalTools.addElement(createAdbTool(adb.getPath()));
         }
-
-        try {
-
-            Method setName = Tool.class.getDeclaredMethod("setName", String.class);
-            setName.setAccessible(true);
-            setName.invoke(tool, TOOL_NAME);
-
-        } catch (Throwable ignore){}
-
-        tool.setEnabled(true);
-        tool.setProgram("cmd");
-
-        tool.setParameters(cmdParams);
-        tool.setWorkingDirectory(getXDEPath());
-
-        externalTools.addElement(tool);
 
         ToolManager.getInstance().setTools(groups.toArray(new ToolsGroup[groups.size()]));
     }
@@ -176,9 +153,83 @@ public class VSEmulatorHelper {
 
     }
 
-    private static Tool getExistingTool() {
+    private static Tool createXdeTool(File configFile) throws IOException {
+        List<String> configData = Files.readLines(configFile, Charset.defaultCharset());
+
+        String displayName = getConfigValue(configData, "device.name").replace("\"", "");
+        String memSize = getConfigValue(configData, "device.vm.ram.size");
+        String diagonalSize = getConfigValue(configData, "device.screen.diagonal");
+        String video = getConfigValue(configData, "device.screen.resolution");
+        String vhd = configFile.getParentFile().getPath() + "\\" + getConfigValue(configData, "device.vm.vhd").replace("\\\\","\\");
+        String name= getConfigValue(configData, "device.name").replace("\"", "") + "." + System.getProperty("user.name");
+
+        String cmdParams = String.format(RUN_CMD_FORMAT, escapeCmdPath(getXDEPath() + "\\xde.exe"), displayName, memSize, diagonalSize, video, vhd, name);
+
+        Tool tool = getExistingTool(XDE_TOOL_NAME);
+
+        if(tool == null) {
+            tool = new Tool();
+        }
+
+        try {
+
+            Method setName = Tool.class.getDeclaredMethod("setName", String.class);
+            setName.setAccessible(true);
+            setName.invoke(tool, XDE_TOOL_NAME);
+
+        } catch (Throwable ignore){}
+
+        tool.setEnabled(true);
+        tool.setProgram("cmd");
+
+        tool.setParameters(cmdParams);
+        tool.setWorkingDirectory(getXDEPath());
+
+        return tool;
+    }
+
+    @NotNull
+    private static Tool createAdbTool(String path) {
+        Tool tool = getExistingTool(ADB_TOOL_NAME);
+        if(tool == null) {
+            tool = new Tool();
+        }
+
+        try {
+
+            Method setName = Tool.class.getDeclaredMethod("setName", String.class);
+            setName.setAccessible(true);
+            setName.invoke(tool, ADB_TOOL_NAME);
+
+        } catch (Throwable ignore){}
+
+        tool.setEnabled(true);
+        tool.setProgram("java");
+
+        String className = EmulatorWaiter.class.getName();
+        String classUrl = EmulatorWaiter.class.getResource(EmulatorWaiter.class.getSimpleName() + ".class").getPath();
+        File classFile = new File(classUrl);
+        if (classFile.exists()) {
+            //remove package directories
+            for (int i = 0; i < className.split(Pattern.quote(".")).length; i++) {
+                classFile = classFile.getParentFile();
+            }
+
+            tool.setParameters(String.format("%s \"%s\"", className, path));
+            tool.setWorkingDirectory(classFile.getPath());
+        } else {
+            String jarPath = classUrl.replace("jar:", "").split(Pattern.quote("!"))[0];
+
+            tool.setParameters(String.format("-cp \"%s\" %s \"%s\"", jarPath, className, path));
+            tool.setWorkingDirectory(System.getProperty("java.home"));
+        }
+
+        return tool;
+    }
+
+    private static Tool getExistingTool(String toolName) {
         for (Tool existingTool : ToolManager.getInstance().getTools(GROUP_NAME)) {
-            if(existingTool.getName().equals(TOOL_NAME)) {
+            if(existingTool.getName().equals(toolName)) {
                 return existingTool;
             }
         }

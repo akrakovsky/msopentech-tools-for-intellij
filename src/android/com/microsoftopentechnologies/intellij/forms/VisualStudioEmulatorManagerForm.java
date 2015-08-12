@@ -94,7 +94,9 @@ public class VisualStudioEmulatorManagerForm extends DialogWrapper {
                     Node node = item.getChildNodes().item(i);
                     if (node.hasAttributes()) {
                         String value = XmlHelper.getAttributeValue(node, "actionId");
-                        if (value != null && value.equals("Tool_External Tools_RunVSEmu")) {
+                        if (value != null
+                                && (value.equals("Tool_External Tools_RunVSEmu")
+                                || value.equals("Tool_External Tools_RunAdbDevice"))) {
                             item.removeChild(node);
                         }
                     }
@@ -106,13 +108,17 @@ public class VisualStudioEmulatorManagerForm extends DialogWrapper {
                     option.setAttribute("enabled", "true");
                     option.setAttribute("actionId", "Tool_External Tools_RunVSEmu");
 
-                    if(item.hasChildNodes()) {
-                        item.insertBefore(option, item.getFirstChild());
-                    } else {
-                        item.appendChild(option);
-                    }
+                    item.appendChild(option);
 
-                    VSEmulatorHelper.setVSEmuTool(files[imagesList.getSelectedIndex()]);
+                    Element adboption = item.getOwnerDocument().createElement("option");
+                    adboption.setAttribute("name", "ToolBeforeRunTask");
+                    adboption.setAttribute("enabled", "true");
+                    adboption.setAttribute("actionId", "Tool_External Tools_RunAdbDevice");
+
+                    item.appendChild(adboption );
+
+
+                    VSEmulatorHelper.setVSEmuTool(files[imagesList.getSelectedIndex()], project);
                 } else {
                     VSEmulatorHelper.unsetVSEmuTool();
                 }
